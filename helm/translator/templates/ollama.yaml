@@ -45,6 +45,13 @@ spec:
             # Store models on the PVC, not in /root (we are not root).
             - name: OLLAMA_MODELS
               value: /models
+            # Keep the model in memory and avoid several CPU inference jobs at once.
+            - name: OLLAMA_KEEP_ALIVE
+              value: "24h"
+            - name: OLLAMA_NUM_PARALLEL
+              value: "1"
+            - name: OLLAMA_CONTEXT_LENGTH
+              value: "2048"
             # Non-root user has no home folder; /tmp is writable.
             - name: HOME
               value: /tmp

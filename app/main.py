@@ -142,11 +142,14 @@ async def call_llm(req: TranslateIn):   # "req: TranslateIn" = req must be a Tra
               "Output only the translation.")
     # Only send an Authorization header if we have an API key
     headers = {"Authorization": f"Bearer {LLM_API_KEY}"} if LLM_API_KEY else {}
+    # Keep replies short enough for a CPU-only model to finish in time.
+    max_tokens = min(512, max(64, len(req.text) // 3 + 32))
     # POST to the standard "chat completions" URL that Ollama, vLLM and OpenAI all share.
     # json={...} is the request body; Python dictionaries become JSON automatically.
     r = await http.post(f"{LLM_BASE_URL}/v1/chat/completions", headers=headers, json={
         "model": LLM_MODEL,
         "temperature": 0,   # 0 = least random, so the same input gives (nearly) the same output
+        "max_tokens": max_tokens,
         "messages": [{"role": "system", "content": system},   # the instructions
                      {"role": "user", "content": req.text}],  # the text to translate
     })
@@ -182,7 +185,8 @@ async def translate(req: TranslateIn):   # FastAPI already validated and convert
             text, p_tok, c_tok = await call_llm(req)   # unpack the 3-value tuple into 3 variables
         except httpx.HTTPError as e:                   # network failure or bad status from the LLM
             REQUESTS.labels("error").inc()
-            log.error("llm call failed: %s", e)        # %s is filled with e (the error details)
+            status = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else "no HTTP status"
+            log.error("llm call failed (%s, %s)", type(e).__name__, status)
             # 502 "Bad Gateway" = we are fine, the server we depend on is not
             raise HTTPException(502, "LLM backend unavailable")
 
