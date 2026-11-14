@@ -1,0 +1,26 @@
+auth_enabled: false            # single-user setup, so no multi-tenant login
+
+server:
+  http_listen_port: 3100       # the port Alloy and Grafana connect to
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki           # base folder inside the container (our volume)
+  replication_factor: 1        # one copy of the data: fine for one node
+  storage:
+    filesystem:                # store on local disk. Production would use S3
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  ring:                        # NOTE: 2 spaces, same level as "storage"
+    kvstore:
+      store: inmemory          # no external coordination service needed
+
+schema_config:                 # how Loki lays out its index on disk
+  configs:
+    - from: 2024-01-01         # this layout applies to data from this date on
+      store: tsdb
+      object_store: filesystem
+      schema: v13              # current schema version
+      index:
+        prefix: index_
+        period: 24h            # one index file per day

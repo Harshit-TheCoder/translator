@@ -1,0 +1,36 @@
+apiVersion: 1 # provisioning file format version
+
+datasources:
+  - name: Prometheus
+    uid: prometheus   # fixed ID so the dashboard and other sources can refer to it
+    type: prometheus 
+    access: proxy  # Grafana's server makes the calls (not your browser)
+    url: http://prometheus:9090  # service name, because Grafana runs INSIDE Docker
+    isDefault: true 
+
+  - name: Loki 
+    uid: loki 
+    type: loki 
+    access: proxy 
+    url: http://loki:3100 
+    jsonData: 
+      derivedFields: # turns part of a log line into a clickable link
+        - name: trace_id 
+          # Finds the trace ID in our JSON log line, e.g.  "trace_id": "0af7651916cd..."
+          matcherRegex: '"trace_id": "(\w+)"'
+          # $$ is how you write a literal $ in Grafana provisioning files.
+          # ${__value.raw} = the text captured by the regex above
+          url: '$${__value.raw}'
+          datasourceUid: tempo #the link opens this trace in Tempo
+          urlDisplayLabel: View trace 
+
+
+  - name: Tempo 
+    uid: tempo 
+    type: tempo 
+    access: proxy 
+    url: http://tempo:3200 
+
+
+
+  

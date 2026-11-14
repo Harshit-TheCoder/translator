@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 15s # collect metrics every 15 seconds
+  evaluation_interval: 15s #check the alert rules every 15 seconds 
+
+# Files that contain alert rules 
+rule_files:
+  - /etc/prometheus/alerts.yml 
+
+scrape_configs:
+  # Job 1: our translator API
+  - job_name: translator
+    metrics_path: /metrics # the url path to read (our fastapi endpoint) 
+    static_configs:
+      - targets: ["app:8001"]
+
+   # Job 2: Prometheus watching itself (a quick sanity check)
+  - job_name: prometheus 
+    static_configs: 
+      - targets: ["localhost:9090"]

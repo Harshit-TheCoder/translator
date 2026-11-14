@@ -1,0 +1,28 @@
+# The collector is a middleman: the app sends traces here, it forwards them on.
+# Later you can change the destination here without touching app code.
+
+
+receivers:
+  otlp: # accept data in the OpenTelemetry (OTLP) format 
+    protocols: 
+      grpc:
+        endpoint: 0.0.0.0:4317 #0.0.0.0 = accept connections from other containers
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {} # group spans into batches: far fewer network calls 
+
+exporters:
+  otlp/tempo: #"otlp/tempo" is just our own name for this exporter 
+    endpoint: tempo:4317 # Tempo's OTLP port, by service name 
+    tls: 
+      insecure: true #no HTTPS inside our private network (local learning only)
+
+
+service:
+  pipelines:                     # wires the parts together: receive -> process -> export
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]

@@ -1,0 +1,24 @@
+# Kyverno policy: reject pods whose containers do not set runAsNonRoot: true.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-non-root
+spec:
+  # Enforce = block the request. (Audit = only report.)
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: containers-must-run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              # Only our namespace, so system pods are untouched.
+              namespaces: ["translator"]
+      validate:
+        message: "Containers must set securityContext.runAsNonRoot to true."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  runAsNonRoot: true

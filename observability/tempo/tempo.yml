@@ -1,0 +1,19 @@
+server:
+  http_listen_port: 3200 # Grafana queries Tempo on this port
+
+
+distributor: # the part of Tempo that receives incoming traces
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317 # the Collector sends traces here
+
+
+storage:
+  trace:
+    backend: local # keep traces on local disk (production: S3)
+    wal: 
+      path: /var/tempo/wal  # temporary "write-ahead log" for data still arriving
+    local:
+      path: /var/tempo/blocks  # finished trace data

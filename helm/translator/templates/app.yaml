@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-app
+spec:
+  replicas: {{ .Values.app.replicas }}
+  selector:
+    # The Deployment manages pods carrying these labels.
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: app
+      annotations:
+        # Config change -> hash changes -> pods restart and pick it up.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # Scrape hints for a Prometheus set up to read them (see notes below).
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+        prometheus.io/path: "/metrics"
+    spec:
+      {{ if .Values.image.pullSecrets }}
+      imagePullSecrets:
+{{ toYaml .Values.image.pullSecrets | indent 8 }}
+      {{ end }}
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8001
+          # Load every key of the ConfigMap as an environment variable.
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-config
+          env:
+            # Secret reference. optional: true = start fine if no secret exists.
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secret.name }}
+                  key: LLM_API_KEY
+                  optional: true
+          # Readiness: "may I receive traffic?" Failing = removed from the Service.
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # Liveness: "am I stuck?" Failing = container restarted.
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          securityContext:
+            # Refuse to start if the image would run as root.
+            runAsNonRoot: true
+            # Same numeric user as your Dockerfile.
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-app
+spec:
+  # ClusterIP = reachable only inside the cluster.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: app
+  ports:
+    - name: http
+      # Port other pods use -> port the container listens on.
+      port: 8000
+      targetPort: http

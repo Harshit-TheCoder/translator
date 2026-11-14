@@ -1,0 +1,40 @@
+// Alloy config. Comments start with // 
+// It works as a pipeline: find containers -> pick the ones we want -> read logs -> sennd to loki
+
+// ask docker for the list of runing containers
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// filter and label them 
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets 
+  // keep only containers from our compose project ( named "translator" at the top of compose)
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "translator"
+    action        = "keep"
+  }
+
+  // Turn the compose service name (app, redis, ....) into a label called "service".
+  // In Grafana we search logs with {service="app"}
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+// read each selected container's stdout/stderr
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.write.default.receiver]   // hand the logs to the writer below
+}
+
+// send everything to loki 
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

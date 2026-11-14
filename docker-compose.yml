@@ -1,0 +1,155 @@
+
+name: translator
+
+services:
+  app:
+    build: .
+    image: translator:dev
+    ports:
+      - "8001:8001"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      LLM_BASE_URL: http://ollama:11434
+      LLM_MODEL: ${LLM_MODEL:-qwen2.5:1.5b}
+      REDIS_URL: redis://redis:6379/0
+    networks: [frontend, backend, observability]
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama: 
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ---------- 3. One-time job: download the model into Ollama ----------
+  ollama-pull:
+    image: ollama/ollama:latest   # same image, but used as a command-line client this time
+    depends_on:
+      ollama:
+        condition: service_healthy    # the server must be up before we ask it to download
+    environment:
+      OLLAMA_HOST: http://ollama:11434  # tells the client which server to talk to
+    command: ["pull", "${LLM_MODEL:-qwen2.5:1.5b}"]  # runs "ollama pull <model>", then exits
+    networks: [backend]
+    restart: "no"                 # a job: run once and stay finished (quotes are needed in YAML)
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]  # a healthy Redis answers PONG
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    command: 
+      - --config.file=/etc/prometheus/prometheus.yml 
+      - --storage.tsdb.path=/prometheus 
+      - --storage.tsdb.retention.time=7d 
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro 
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro 
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9091:9090"
+    networks: [observability]
+    restart: unless-stopped 
+
+  loki: 
+    image: grafana/loki:3.3.2
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./observability/loki/loki.yml:/etc/loki/loki.yml:ro 
+      - loki-data:/loki 
+    networks: [observability]
+    restart: unless-stopped 
+
+  alloy: 
+    image: grafana/alloy:v1.5.1
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro 
+      - /var/run/docker.sock:/var/run/docker.sock:ro 
+    networks: [observability]
+    depends_on: [loki]
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.116.1 
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability/otel/otel-collector.yml:/etc/otelcol/config.yaml:ro 
+    networks: [observability] 
+    depends_on: [tempo] 
+    restart: unless-stopped 
+
+  tempo: 
+    image: grafana/tempo:2.6.1 
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ./observability/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo-data:/var/tempo
+    networks: [observability]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0 
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      # CHANGE THIS. Set GRAFANA_PASSWORD in your shell or a .env file (never commit it)
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes: 
+      # Provisioning = Grafana reads these files at startup and configures itself
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana   # only for Grafana's own data (users, preferences)
+    ports:
+      - "127.0.0.1:3001:3000" 
+    networks: [observability]
+    depends_on: [prometheus, loki, tempo]
+    restart: unless-stopped 
+
+
+# ---------- Networks ----------
+# Compose creates these virtual networks (named translator_frontend and translator_backend).
+# Containers can only talk to others on a network they share.
+networks:
+  frontend:     # the user-facing side 
+  backend:      # private side: Redis and Ollama live only here
+  observability:   # monitoring tools. The app is the only app container on it
+
+# ---------- Volumes ----------
+# Named volumes are storage managed by Docker. They outlive the containers.
+volumes:
+  ollama-models:
+  redis-data:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  grafana-data:

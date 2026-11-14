@@ -1,0 +1,30 @@
+# One-time Job: the Kubernetes version of your "ollama-pull" Compose service.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-ollama-pull
+spec:
+  # Retry up to 6 times if the server is not ready yet.
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: pull
+          image: {{ .Values.ollama.image }}
+          command: ["sh", "-c"]
+          # Wait until the Ollama server answers, then ask it to download the model.
+          args:
+            - until ollama list >/dev/null 2>&1; do echo "waiting for ollama"; sleep 3; done; ollama pull {{ .Values.config.LLM_MODEL }}
+          env:
+            # Talk to the Ollama SERVER; the model is stored on ITS disk.
+            - name: OLLAMA_HOST
+              value: "http://{{ .Release.Name }}-ollama:11434"
+            - name: HOME
+              value: /tmp
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

@@ -1,0 +1,38 @@
+# Settings you can override at install time. Templates read these.
+image:
+  repository: ghcr.io/Harshit-TheCoder/translator
+  tag: "dev"
+  # IfNotPresent lets kind use an image loaded with "kind load".
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+app:
+  replicas: 1
+  resources:
+    # requests = what the scheduler reserves; limits = hard ceiling.
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+
+# Non-secret environment variables. They become the ConfigMap.
+config:
+  LLM_MODEL: "qwen2.5:1.5b"
+  MAX_CHARS: "2000"
+  CACHE_TTL_SECONDS: "86400"
+
+# Secret handling. Ollama needs no key, so we create nothing by default.
+# For a paid API: kubectl create secret generic translator-secrets --from-literal=LLM_API_KEY=...
+secret:
+  create: false
+  name: translator-secrets
+  llmApiKey: ""
+
+redis:
+  image: redis:7-alpine
+  maxmemory: 128mb
+
+ollama:
+  image: ollama/ollama:0.5.4
+  storage: 5Gi
+  resources:
+    requests: { cpu: 500m, memory: 2Gi }
+    limits: { memory: 4Gi }

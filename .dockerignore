@@ -1,0 +1,9 @@
+# Files Docker must NOT copy into the build: faster builds, smaller images, no leaks
+.git
+.venv
+__pycache__
+*.pyc
+tests
+.env
+*.md
+Dockerfile

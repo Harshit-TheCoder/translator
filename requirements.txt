@@ -1,0 +1,11 @@
+# Only what the app needs at runtime. Versions are pinned so builds are repeatable.
+# (Double-check for newer stable versions on pypi.org.)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+redis==5.2.1
+prometheus-client==0.21.1
+opentelemetry-sdk==1.29.0
+opentelemetry-exporter-otlp-proto-grpc==1.29.0
+opentelemetry-instrumentation-fastapi==0.50b0
+opentelemetry-instrumentation-httpx==0.50b0

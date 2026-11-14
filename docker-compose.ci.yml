@@ -1,0 +1,48 @@
+# Separate project name so it never clashes with the "translator" stack.
+name: translator-ci 
+
+services:
+  sonar-db:
+    image: postgres:16-alpine 
+    environment:
+      POSTGRES-USER: sonar 
+      # Local-only throwaway password. Never reuse this anywhere real. 
+      POSTGRES_PASSWORD: sonar_local_only 
+      POSTGRES_DB: sonar 
+    volumes:
+      - sonar-db-data:/var/lib/postgresql/data 
+  
+  sonarqube:
+    image: sonarqube:10.7.0-community
+    depends_on:
+      - sonar-db 
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: sonar_local_only
+    ports:
+      - "127.0.0.1:9002:9000"
+    volumes:
+      - sonar-data:/opt/sonarqube/data
+      - sonar-extensions:/opt/sonarqube/extensions
+      - sonar-logs:/opt/sonarqube/logs
+
+  
+  jenkins:
+    build: ./jenkins
+    # Root only so Jenkins may use the Docker socket. Fine for a local lab only.
+    user: root
+    ports:
+      - "127.0.0.1:8085:8080"
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      # Lets Jenkins run docker build/push using Docker Desktop's engine.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+
+volumes:
+  sonar-db-data:
+  sonar-data:
+  sonar-extensions:
+  sonar-logs:
+  jenkins-home:

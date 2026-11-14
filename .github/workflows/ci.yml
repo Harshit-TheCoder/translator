@@ -1,0 +1,126 @@
+name: clickable
+
+# Run on pushes to main and on pull requests targeting main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: by default the built-in token may only READ  the repo.
+permissions:
+  contents: read 
+
+env:
+  # Must be all lowercase. Replace YOUR_GITHUB_USER (lowercase).
+  IMAGE: ghcr.io/harshit-thecoder/translator
+
+
+jobs:
+  # ------ Job 1: tests, golden-set eval, SonarQube ---------- 
+  test: 
+    runs-on: ubuntu-24.04 
+    env:
+      # Empty if you have not created the secret. The Sonar step then skips itself. 
+      SONAR_TOKEN  : ${{ secrets.SONAR_TOKEN }}
+    services:
+      # A real Redis next to the job, reachable at localhost:6379 
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10 
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Sonar needs full git history to detect "new code".
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip 
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt 
+      
+      - name: Unit tests with coverage 
+        run: python -m pytest -q --cov=app --cov-report=xml 
+      
+      - name: Golden-set eval (fails the build if score is too low)
+        run: bash ci/run_eval.sh 
+
+      - name: SonarQube scan and quality gate
+        if: env.SONAR_TOKEN != ''
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+        with:
+          # Wait for the quality gate result and fail the job if it is red
+          args: -Dsonar.qualitygate.wait=true
+
+  # ------- Job 2: build, Trivy scan, push ---------
+  image: 
+    needs: test 
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Needed to push to ghcr.io with the built-in token.   
+      packages: write
+    steps: 
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (kept on the runner, not pushed yet) 
+        uses: docker/build-push-action@v6 
+        with: 
+          context: .
+          load: true 
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha 
+          cache-to: type=gha, mode=max 
+      - name: Trivy scan(fail on CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          severity: CRITICAL
+          # Exit code 1 turns a finding into a red build.
+          exit-code: "1"
+          # Ignore CRITICAL issues that have no fix available yet.
+          ignore-unfixed: true
+
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3 
+        with: 
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Push image tagged with the commit SHA 
+        if: github.event_name == 'push' 
+        run: docker push ${{ env.IMAGE }}:${{ github.sha }}
+
+  # ------ Job 3: GitOps, write the new tag into the config repo ------ 
+  gitops:
+    needs: image
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the CONFIG repo (not this repo)
+        uses: actions/checkout@v4
+        with:
+          repository: Harshit-TheCoder/translator-config
+          token: ${{ secrets.CONFIG_REPO_TOKEN }}
+
+      - name: Update image tag and push
+        run: |
+          # Replace the line "  tag: ..." (two-space indent) with the new SHA.
+          sed -i "s|^  tag:.*|  tag: '${{ github.sha }}'|" env/dev/values.yaml
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          git add env/dev/values.yaml
+          git commit -m "chore: translator image ${{ github.sha }}" || echo "nothing to commit"
+          git push    
