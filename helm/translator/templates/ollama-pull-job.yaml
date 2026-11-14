@@ -2,7 +2,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ .Release.Name }}-ollama-pull
+  name: {{ .Release.Name }}-ollama-pull-{{ .Values.config.LLM_MODEL | replace ":" "-" }}
 spec:
   # Retry up to 6 times if the server is not ready yet.
   backoffLimit: 6
